@@ -30,14 +30,12 @@ namespace BlockChainP411NEW.Services
             string foundHash = string.Empty;
             object lockObj = new object();
 
-            // 1. Змінні для статистики та оптимізації
             long totalHashes = 0;
-            const int batchSize = 50_000; // Розмір "партії" для уникнення False Sharing
+            const int batchSize = 50_000;
 
             var tasks = new List<Task>();
             string baseData = $"{block.Index}{block.TimeStamp}{block.Data}{block.PreviousHash}";
 
-            // Запускаємо секундомір
             Stopwatch stopwatch = Stopwatch.StartNew();
 
             for (int i = 0; i < coreCount; i++)
@@ -47,13 +45,13 @@ namespace BlockChainP411NEW.Services
                 tasks.Add(Task.Run(() =>
                 {
                     int localNonce = threadOffset;
-                    long localHashes = 0; // Локальний лічильник для конкретного потоку (в L1 кеші ядра)
+                    long localHashes = 0; 
 
                     while (!internalCts.Token.IsCancellationRequested)
                     {
                         string blockData = $"{baseData}{localNonce}";
                         string hash = _hashingService.ComputeHash(blockData);
-                        localHashes++; // Збільшуємо локальний лічильник без блокувань
+                        localHashes++; 
 
                         if (hash.StartsWith(target))
                         {
@@ -71,15 +69,12 @@ namespace BlockChainP411NEW.Services
 
                         localNonce += coreCount;
 
-                        // 2. Вивантажуємо партію в загальний лічильник
                         if (localHashes == batchSize)
                         {
                             Interlocked.Add(ref totalHashes, localHashes);
                             localHashes = 0; // Скидаємо локальний лічильник
                         }
                     }
-
-                    // 3. Додаємо залишок, якщо потік зупинився до досягнення повного batchSize
                     if (localHashes > 0)
                     {
                         Interlocked.Add(ref totalHashes, localHashes);
@@ -94,17 +89,15 @@ namespace BlockChainP411NEW.Services
             }
             catch (OperationCanceledException)
             {
-                // Ігноруємо скасування задач
             }
 
-            stopwatch.Stop(); // Зупиняємо секундомір
+            stopwatch.Stop();
 
             if (foundNonce.HasValue && !cancellationToken.IsCancellationRequested)
             {
                 block.Nonce = foundNonce.Value;
                 block.Hash = foundHash;
 
-                // 4. Розрахунок Hashrate та вивід статистики
                 double seconds = stopwatch.Elapsed.TotalSeconds;
                 double hashRate = seconds > 0 ? totalHashes / seconds : 0;
 
