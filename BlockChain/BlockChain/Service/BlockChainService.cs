@@ -19,7 +19,7 @@ namespace BlockChainP411NEW.Services
         {
             Chain = new List<Block>(); // Ініціалізуємо ланцюжок блоків як порожній список
             _hashingService = new HashingService(); // Ініціалізуємо сервіс для обчислення хешу
-            Difficulty = 6; // Встановлюємо складність майнінгу
+            Difficulty = 5; // Встановлюємо складність майнінгу
             miningService = new MiningService(_hashingService); // Ініціалізуємо сервіс для майнінгу, передаючи йому сервіс для обчислення хешу
             CreateGenesisBlock(); // Створюємо генезис-блок, який є першим блоком у ланцюжку і не має попереднього блоку
         }
@@ -75,6 +75,31 @@ namespace BlockChainP411NEW.Services
                 }
             }
             return true; // Якщо всі блоки в ланцюжку є дійсними, повертаємо true
+        }
+        public int GetInvalidBlockIndex()
+        {
+            for (int i = 1; i < Chain.Count; i++)
+            {
+                var currentBlock = Chain[i];
+                var previousBlock = Chain[i - 1];
+
+                if (currentBlock.Hash != _hashingService.ComputeHash(currentBlock))
+                {
+                    return currentBlock.Index;
+                }
+
+                if (currentBlock.PreviousHash != previousBlock.Hash)
+                {
+                    return currentBlock.Index;
+                }
+
+                if (!currentBlock.Hash.StartsWith(new string('0', Difficulty)))
+                {
+                    return currentBlock.Index; 
+                }
+            }
+
+            return -1;
         }
     }
 }

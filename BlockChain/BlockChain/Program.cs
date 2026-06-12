@@ -3,17 +3,22 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
+// Встановлюємо кодування UTF-8 для коректного відображення кирилиці в консолі
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+
 var blockChain = new BlockChainService();
 var displayService = new BlockChainDisplayService();
 
-string choice;
+string? choice;
 
 do
 {
     Console.WriteLine("\n=== МЕНЮ БЛОКЧЕЙНУ ===");
-    Console.WriteLine("1. Додати блок (Майнінг)");
-    Console.WriteLine("2. Перевірити валідність блокчейну");
-    Console.WriteLine("3. Відобразити блокчейн");
+    Console.WriteLine("1. Додати блок (Запустити багатопотоковий майнінг)");
+    Console.WriteLine("2. Перевірити валідність ланцюга (IsValid)");
+    Console.WriteLine("3. Знайти пошкоджений блок (GetInvalidBlockIndex)");
+    Console.WriteLine("4. Відобразити весь блокчейн");
+    Console.WriteLine("5. Симулювати хакерську атаку (змінити блок №1)");
     Console.WriteLine("0. Вийти");
     Console.Write("Ваш вибір: ");
 
@@ -22,57 +27,65 @@ do
     switch (choice)
     {
         case "1":
-            Console.WriteLine("Введіть дані для нового блоку:");
+            Console.WriteLine("\nВведіть дані для нового блоку:");
             var data = Console.ReadLine();
 
             if (!string.IsNullOrWhiteSpace(data))
             {
-                using var cts = new CancellationTokenSource();
-
-                // Симуляція мережі (Асинхронне скасування)
-                var networkSimulationTask = Task.Run(async () =>
-                {
-                    var rnd = new Random();
-                    // Імітуємо, що хтось інший знайде блок через 2-7 секунд
-                    int delay = rnd.Next(2000, 7000);
-                    await Task.Delay(delay, cts.Token);
-
-                    if (!cts.Token.IsCancellationRequested)
-                    {
-                        Console.WriteLine("\n\n[Мережа] Хто не вспiв, той i апаздав");
-                        cts.Cancel(); // Надсилаємо сигнал скасування нашому майнеру
-                    }
-                });
-
-                // Запускаємо локальний майнінг, передаючи токен
-                bool isSuccess = await blockChain.AddBlockAsync(data, cts.Token);
-
-                if (isSuccess)
-                {
-                    Console.WriteLine("\n[Успіх] +15% до соціональних кредитiв.");
-                    cts.Cancel(); // Зупиняємо симуляцію мережі, бо ми виграли гонку
-                }
-                else
-                {
-                    Console.WriteLine("\n[Відхилено] Не сьогодні рідний)");
-                }
+                // Запускаємо асинхронний майнінг. Передаємо CancellationToken.None, 
+                // оскільки в цьому завданні ми не перериваємо його мережею.
+                await blockChain.AddBlockAsync(data, CancellationToken.None);
+                Console.WriteLine("[Успіх] Блок успішно додано до ланцюга!");
+            }
+            else
+            {
+                Console.WriteLine("Помилка: Дані не можуть бути порожніми.");
             }
             break;
 
         case "2":
+            Console.WriteLine();
             displayService.PrintValidationResult(blockChain.IsValid());
             break;
 
         case "3":
+            Console.WriteLine("\n--- ДЕТЕКТОР ПОШКОДЖЕНЬ ---");
+            int invalidIndex = blockChain.GetInvalidBlockIndex();
+            if (invalidIndex != -1)
+            {
+                Console.WriteLine($"[КРИТИЧНО] Знайдено порушення цілісності! Підроблений блок під номером: {invalidIndex}");
+            }
+            else
+            {
+                Console.WriteLine("[ОК] Ланцюг абсолютно валідний. Помилок не знайдено.");
+            }
+            break;
+
+        case "4":
+            Console.WriteLine();
             displayService.PrintBlockChain(blockChain.Chain);
             break;
 
+        case "5":
+            if (blockChain.Chain.Count > 1)
+            {
+                Console.WriteLine("\n[Увага] Виконується втручання в блокчейн...");
+                // Змінюємо дані в першому блоці після Генезису
+                blockChain.Chain[1].Data = "ПІДРОБЛЕНІ ДАНІ: Переказ 1000000 монет хакеру!";
+                Console.WriteLine("Дані в блоці №1 було навмисно змінено. Тепер використайте пункт 2 або 3 для перевірки.");
+            }
+            else
+            {
+                Console.WriteLine("\nСпочатку додайте хоча б один блок (Пункт 1), щоб було що підробляти.");
+            }
+            break;
+
         case "0":
-            Console.WriteLine("Завершення роботи...");
+            Console.WriteLine("\nЗавершення роботи системи...");
             break;
 
         default:
-            Console.WriteLine("Невірний вибір. Будь ласка, введіть число від 0 до 3.");
+            Console.WriteLine("\nНевірний вибір. Будь ласка, введіть число від 0 до 5.");
             break;
     }
 } while (choice != "0");

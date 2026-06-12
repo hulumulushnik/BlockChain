@@ -1,6 +1,7 @@
 ﻿using BlockChainP411NEW.Models;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,86 +16,117 @@ namespace BlockChainP411NEW.Services
             _hashingService = hashingService;
         }
 
-        // Тепер метод асинхронний і повертає bool (успіх або скасування)
         public async Task<bool> MineBlockAsync(Block block, int difficulty, CancellationToken cancellationToken)
         {
             string target = new string('0', difficulty);
-            int coreCount = Environment.ProcessorCount; // Отримуємо кількість доступних ядер
-            Console.WriteLine($"\n[Система] Запуск майнінгу. Задіяно логічних ядер: {coreCount}");
+            int coreCount = Environment.ProcessorCount;
 
-            // Об'єднуємо зовнішній токен (мережа) з внутрішнім (щоб зупинити інші потоки, якщо один знайде хеш)
+            Console.WriteLine($"\n[Система] Запуск майнінгу. Задіяно логічних ядер: {coreCount}");
+            Console.WriteLine($"[Система] Складність (Difficulty): {difficulty}");
+
             using var internalCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
             int? foundNonce = null;
             string foundHash = string.Empty;
-            object lockObj = new object(); // Об'єкт для блокування доступу до спільних змінних при знаходженні
+            object lockObj = new object();
+
+            // 1. Змінні для статистики та оптимізації
+            long totalHashes = 0;
+            const int batchSize = 50_000; // Розмір "партії" для уникнення False Sharing
 
             var tasks = new List<Task>();
-
-            // Формуємо базовий рядок даних ОДИН раз, щоб уникнути Race Condition та зайвих обчислень
             string baseData = $"{block.Index}{block.TimeStamp}{block.Data}{block.PreviousHash}";
+
+            // Запускаємо секундомір
+            Stopwatch stopwatch = Stopwatch.StartNew();
 
             for (int i = 0; i < coreCount; i++)
             {
-                int threadOffset = i; // Локальна копія змінного циклу для замикання (closure)
+                int threadOffset = i;
 
                 tasks.Add(Task.Run(() =>
                 {
                     int localNonce = threadOffset;
+                    long localHashes = 0; // Локальний лічильник для конкретного потоку (в L1 кеші ядра)
 
-                    // Цикл працює, поки не буде запиту на скасування (від мережі або іншого потоку)
                     while (!internalCts.Token.IsCancellationRequested)
                     {
-                        // Кожен потік формує власний унікальний рядок
                         string blockData = $"{baseData}{localNonce}";
                         string hash = _hashingService.ComputeHash(blockData);
+                        localHashes++; // Збільшуємо локальний лічильник без блокувань
 
                         if (hash.StartsWith(target))
                         {
-                            // Критична секція: фіксуємо результат
                             lock (lockObj)
                             {
                                 if (!internalCts.Token.IsCancellationRequested)
                                 {
                                     foundNonce = localNonce;
                                     foundHash = hash;
-                                    internalCts.Cancel(); // Зупиняємо всі інші потоки
+                                    internalCts.Cancel();
                                 }
                             }
                             break;
                         }
 
-                        // Стратегія кроку (stride)
                         localNonce += coreCount;
 
-                        // Вивід крапок для розуміння, що процес іде (зменшено частоту для багатопотоковості)
-                        if (localNonce % 1_000_000 == threadOffset)
+                        // 2. Вивантажуємо партію в загальний лічильник
+                        if (localHashes == batchSize)
                         {
-                            Console.Write(".");
+                            Interlocked.Add(ref totalHashes, localHashes);
+                            localHashes = 0; // Скидаємо локальний лічильник
                         }
                     }
+
+                    // 3. Додаємо залишок, якщо потік зупинився до досягнення повного batchSize
+                    if (localHashes > 0)
+                    {
+                        Interlocked.Add(ref totalHashes, localHashes);
+                    }
+
                 }, internalCts.Token));
             }
 
             try
             {
-                await Task.WhenAll(tasks); // Чекаємо завершення всіх потоків
+                await Task.WhenAll(tasks);
             }
             catch (OperationCanceledException)
             {
-                // Очікуваний виняток при скасуванні задач
+                // Ігноруємо скасування задач
             }
 
-            // Перевіряємо, чи ми знайшли блок, чи нас скасувала зовнішня мережа
+            stopwatch.Stop(); // Зупиняємо секундомір
+
             if (foundNonce.HasValue && !cancellationToken.IsCancellationRequested)
             {
-                // Лише тепер, коли все обчислено безпечно, оновлюємо стан об'єкта Block
                 block.Nonce = foundNonce.Value;
                 block.Hash = foundHash;
+
+                // 4. Розрахунок Hashrate та вивід статистики
+                double seconds = stopwatch.Elapsed.TotalSeconds;
+                double hashRate = seconds > 0 ? totalHashes / seconds : 0;
+
+                string formattedHashRate;
+                if (hashRate >= 1_000_000)
+                    formattedHashRate = $"{hashRate / 1_000_000:F2} MH/s (Мегахешів/сек)";
+                else if (hashRate >= 1_000)
+                    formattedHashRate = $"{hashRate / 1_000:F2} KH/s (Кілохешів/сек)";
+                else
+                    formattedHashRate = $"{hashRate:F2} H/s (Хешів/сек)";
+
+                Console.WriteLine($"\n=== СТАТИСТИКА МАЙНІНГУ ===");
+                Console.WriteLine($"Витрачено часу:      {seconds:F3} сек.");
+                Console.WriteLine($"Перевірено комбінацій: {totalHashes:N0}");
+                Console.WriteLine($"Швидкість (Hashrate):  {formattedHashRate}");
+                Console.WriteLine($"Знайдений Nonce:       {foundNonce.Value}");
+                Console.WriteLine($"===========================\n");
+
                 return true;
             }
 
-            return false; // Майнінг перервано ззовні
+            return false;
         }
     }
 }
