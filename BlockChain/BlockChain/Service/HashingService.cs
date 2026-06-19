@@ -1,24 +1,31 @@
 ﻿using BlockChainP411NEW.Models;
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace BlockChainP411NEW.Services
 {
     public class HashingService
     {
-        // Метод для обчислення хешу блоку
         public string ComputeHash(Block block)
         {
-            // Створюємо рядок, який містить всі дані блоку для обчислення хешу
-            string blockData = $"{block.Index}{block.TimeStamp}{block.Data}{block.PreviousHash}{block.Nonce}";
-            return ComputeHash(blockData);
+            return ComputeHash(GetBaseBlockData(block) + $"{block.Nonce}{block.Difficulty}");
         }
 
-        // Метод для обчислення хешу на основі рядка
+        // Виділили підготовку базових даних в окремий метод, щоб наш надшвидкий майнер 
+        // міг обчислити їх ОДИН раз і не гальмувати
+        public string GetBaseBlockData(Block block)
+        {
+            var totalTxHash = "";
+            foreach (var item in block.Transactions)
+            {
+                totalTxHash += ComputeHash(item.ToRawString());
+            }
+
+            // Використовуємо форматування "O" (Round-trip) для часу, як у вашому скріншоті
+            return $"{block.Index}{block.TimeStamp.ToString("O")}{totalTxHash}{block.PreviousHash}";
+        }
+
         public string ComputeHash(string input)
         {
             byte[] inputBytes = Encoding.UTF8.GetBytes(input);

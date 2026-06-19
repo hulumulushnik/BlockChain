@@ -1,34 +1,32 @@
-﻿namespace BlockChainP411NEW.Models
+﻿using System;
+using System.Collections.Generic;
+
+namespace BlockChainP411NEW.Models
 {
     public class Block
     {
-        // Порядковий номер блоку в ланцюжку
         public int Index { get; set; }
-
-        // Час створення блоку
         public DateTime TimeStamp { get; set; }
 
-        // Дані, які зберігаються в блоці
-        public string Data { get; set; }
+        // Тепер блок містить список транзакцій замість одного рядка
+        public List<Transaction> Transactions { get; set; }
 
-        // Хеш попереднього блоку в ланцюжку
         public string PreviousHash { get; set; }
-
-        // Число, яке використовується для процесу майнінгу (пошуку правильного хешу)
-        public int Nonce { get; set; }
-
-        // Хеш поточного блоку, який обчислюється на основі даних блоку та хешу попереднього блоку
+        public long Nonce { get; set; }
         public string Hash { get; set; }
+        public double MiningDuration { get; set; }
+        public int Difficulty { get; set; }
 
-        // Конструктор для створення нового блоку
-        public Block(int index, DateTime timeStamp, string data, string previousHash)
+        public Block(int index, DateTime timeStamp, List<Transaction> transactions, string previousHash, int difficulty)
         {
             Index = index;
             TimeStamp = timeStamp;
-            Data = data;
+            Transactions = transactions; // Зберігаємо список
             PreviousHash = previousHash;
+            Difficulty = difficulty;
             Hash = string.Empty;
             Nonce = 0;
+            MiningDuration = 0;
         }
     }
 }
