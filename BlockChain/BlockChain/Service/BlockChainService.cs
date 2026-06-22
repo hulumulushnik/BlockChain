@@ -18,6 +18,10 @@ namespace BlockChainP411NEW.Services
 
         public int Difficulty { get; private set; }
         public int MaxBlockSizeBytes { get; } = 256;
+        public decimal RewardAmount { get; } = 50;
+        public decimal MaxSupply { get; } = 1000;
+        public decimal TotalMinted { get; private set; } = 0;
+
         private readonly double _targetBlockTime = 10.0;
         private readonly int _adjustmentInterval = 2;
 
@@ -28,8 +32,25 @@ namespace BlockChainP411NEW.Services
             _miningService = new MiningService(_hashingService);
             _walletService = new WalletService();
             _transactionService = new TransactionService(_walletService);
+
+            _transactionService.BlockChain = this;
+
             Difficulty = 4;
             CreateGenesisBlock();
+        }
+
+        public decimal GetBalance(string address)
+        {
+            decimal balance = 0;
+            foreach (var block in Chain)
+            {
+                foreach (var transaction in block.Transactions)
+                {
+                    if (transaction.From == address) balance -= transaction.Amount;
+                    if (transaction.To == address) balance += transaction.Amount;
+                }
+            }
+            return balance;
         }
 
         private void CreateGenesisBlock()
@@ -46,15 +67,73 @@ namespace BlockChainP411NEW.Services
             var recentBlocks = Chain.Skip(Math.Max(0, Chain.Count - _adjustmentInterval)).ToList();
             double avgTime = recentBlocks.Average(b => b.MiningDuration);
 
-            if (avgTime < _targetBlockTime) Difficulty++;
-            else if (avgTime > _targetBlockTime) Difficulty = Math.Max(1, Difficulty - 1);
+            if (avgTime < _targetBlockTime)
+            {
+
+                Difficulty = Math.Min(Difficulty + 1, 4);
+            }
+            else if (avgTime > _targetBlockTime)
+            {
+                Difficulty = Math.Max(1, Difficulty - 1);
+            }
         }
 
-        public async Task<bool> AddBlockAsync(List<Transaction> pendingTransactions, CancellationToken cancellationToken)
+        public async Task<bool> AddBlockAsync(List<Transaction> pendingTransactions, string minerAddress, CancellationToken cancellationToken)
         {
             AdjustDifficulty();
+
+            var validTransactions = new List<Transaction>();
+            var tempBalances = new Dictionary<string, decimal>();
+
+            decimal GetTempBalance(string address)
+            {
+                if (!tempBalances.ContainsKey(address))
+                    tempBalances[address] = GetBalance(address);
+                return tempBalances[address];
+            }
+
+            foreach (var tx in pendingTransactions)
+            {
+                decimal currentBalance = GetTempBalance(tx.From);
+                if (currentBalance < tx.Amount)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"[ЗАХИСТ] Транзакція {tx.Id} ВІДХИЛЕНА: Double Spend! (На балансі: {currentBalance}, спроба витратити: {tx.Amount})");
+                    Console.ResetColor();
+                    continue;
+                }
+
+                tempBalances[tx.From] -= tx.Amount;
+                validTransactions.Add(tx);
+            }
+
+            decimal currentReward = 0;
+            if (TotalMinted < MaxSupply)
+            {
+                decimal availableToMint = MaxSupply - TotalMinted;
+                currentReward = Math.Min(RewardAmount, availableToMint);
+                TotalMinted += currentReward;
+
+                var rewardTransaction = new Transaction("COINBASE", minerAddress, currentReward, null);
+                validTransactions.Insert(0, rewardTransaction);
+            }
+
+            List<Transaction> acceptedTransactions = new List<Transaction>();
+            int currentBlockSizeBytes = 0;
+
+            foreach (var tx in validTransactions)
+            {
+                int txSize = System.Text.Encoding.UTF8.GetByteCount(tx.ToRawString());
+                if (currentBlockSizeBytes + txSize <= MaxBlockSizeBytes)
+                {
+                    acceptedTransactions.Add(tx);
+                    currentBlockSizeBytes += txSize;
+                }
+                else break;
+            }
+
             var lastBlock = Chain.Last();
-            var newBlock = new Block(lastBlock.Index + 1, DateTime.UtcNow, pendingTransactions, lastBlock.Hash, Difficulty);
+            var newBlock = new Block(lastBlock.Index + 1, DateTime.UtcNow, acceptedTransactions, lastBlock.Hash, Difficulty);
 
             bool isMined = await _miningService.MineBlockAsync(newBlock, Difficulty, cancellationToken);
 
@@ -66,45 +145,30 @@ namespace BlockChainP411NEW.Services
             return false;
         }
 
-        public async Task ProcessTransactionsAsync(List<Transaction> incomingTransactions)
+        public bool ValidateEconomy()
         {
-            var currentChunk = new List<Transaction>();
-            int currentBytes = 0;
+            HashSet<string> uniqueAddresses = new HashSet<string>();
 
-            Console.WriteLine($"\n[Smart Chunking] Початок пакування {incomingTransactions.Count} транзакцій...");
-
-            foreach (var tx in incomingTransactions)
+            foreach (var block in Chain)
             {
-                int txSize = System.Text.Encoding.UTF8.GetByteCount(tx.ToRawString());
-
-                if (txSize > MaxBlockSizeBytes)
+                foreach (var tx in block.Transactions)
                 {
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine($"[Відхилено] Транзакція {tx.Id} важить {txSize} байт (більше ліміту {MaxBlockSizeBytes}).");
-                    Console.ResetColor();
-                    continue;
+                    if (tx.From != "COINBASE") uniqueAddresses.Add(tx.From);
+                    uniqueAddresses.Add(tx.To);
                 }
-
-                if (currentBytes + txSize > MaxBlockSizeBytes)
-                {
-                    Console.WriteLine($"\n[Пакування] Блок заповнено ({currentBytes}/{MaxBlockSizeBytes} байт). Запуск майнінгу...");
-                    await AddBlockAsync(new List<Transaction>(currentChunk), CancellationToken.None);
-
-                    currentChunk.Clear();
-                    currentBytes = 0;
-                }
-
-                currentChunk.Add(tx);
-                currentBytes += txSize;
             }
 
-            if (currentChunk.Count > 0)
+            decimal totalCirculating = 0;
+            foreach (var address in uniqueAddresses)
             {
-                Console.WriteLine($"\n[Пакування] Пакування залишку ({currentBytes}/{MaxBlockSizeBytes} байт). Запуск майнінгу...");
-                await AddBlockAsync(new List<Transaction>(currentChunk), CancellationToken.None);
+                totalCirculating += GetBalance(address);
             }
 
-            Console.WriteLine("\n[Smart Chunking] Всі транзакції успішно розподілені та запаковані в блоки!\n");
+            Console.WriteLine($"\n[АУДИТ ЕКОНОМІКИ]");
+            Console.WriteLine($"Загальна емісія (TotalMinted): {TotalMinted}");
+            Console.WriteLine($"Грошей на руках (Circulating): {totalCirculating}");
+
+            return totalCirculating == TotalMinted;
         }
 
         public bool IsValid()

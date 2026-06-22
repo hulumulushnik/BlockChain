@@ -11,12 +11,10 @@ namespace BlockChainP411NEW.Models
         public string To { get; set; }
         public decimal Amount { get; set; }
         public DateTime TimeStamp { get; set; }
+        public byte[]? SenderPublicKey { get; set; } // Тепер може бути null для COINBASE
+        public byte[]? Signature { get; set; }
 
-        // Нові поля зі скріншоту
-        public byte[] SenderPublicKey { get; set; }
-        public byte[] Signature { get; set; }
-
-        public Transaction(string from, string to, decimal amount, byte[] senderPublicKey)
+        public Transaction(string from, string to, decimal amount, byte[]? senderPublicKey)
         {
             From = from;
             To = to;
@@ -31,7 +29,6 @@ namespace BlockChainP411NEW.Models
             return $"From:{From}|To:{To}|Amount:{Amount}";
         }
 
-        // Метод для отримання байтів, які будуть підписуватися
         public byte[] GetDataToSign()
         {
             return Encoding.UTF8.GetBytes(ToRawString());
