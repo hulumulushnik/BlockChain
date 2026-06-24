@@ -6,33 +6,30 @@ namespace BlockChainP411NEW.Services
     public class TransactionService
     {
         private readonly WalletService _walletService;
-        public BlockChainService BlockChain { get; set; } // Додано для доступу до балансу
+        public BlockChainService BlockChain { get; set; }
 
         public TransactionService(WalletService walletService)
         {
             _walletService = walletService;
         }
 
-        public Transaction CreateTransaction(Wallet walletFrom, string to, decimal amount)
+        public Transaction CreateTransaction(Wallet walletFrom, string to, decimal amount, decimal fee = 0m)
         {
-            // Перевірка балансу відправника
             if (BlockChain != null)
             {
-                decimal balance = BlockChain.GetBalance(walletFrom.Address);
-                if (balance < amount)
-                {
-                    throw new ArgumentException($"Insufficient funds. Available: {balance}, Required: {amount}");
-                }
+                decimal balance = BlockChain.GetPendingBalance(walletFrom.Address);
+                if (balance < amount + fee)
+                    throw new ArgumentException($"Insufficient funds. Available: {balance}, Required: {amount + fee}");
             }
 
             var tx = new Transaction(walletFrom.Address, to, amount, walletFrom.PublicKey);
+            tx.Fee = fee;
             tx.Signature = walletFrom.Sign(tx.GetDataToSign());
 
             var validation = ValidateTransaction(tx);
             if (!validation.IsValid)
-            {
                 throw new ArgumentException(validation.ErrorMessage);
-            }
+
             return tx;
         }
 
@@ -43,7 +40,6 @@ namespace BlockChainP411NEW.Services
             if (string.IsNullOrWhiteSpace(transaction.To)) return (false, "Recipient cannot be empty.");
             if (transaction.Amount <= 0) return (false, "Amount must be greater than zero.");
 
-            // Якщо це системна винагорода за майнінг - пропускаємо перевірку підпису
             if (transaction.From == "COINBASE")
                 return (true, string.Empty);
 
@@ -54,7 +50,6 @@ namespace BlockChainP411NEW.Services
 
             string publicKeyBase64 = Convert.ToBase64String(transaction.SenderPublicKey);
             bool isSignatureValid = _walletService.VerifySignature(publicKeyBase64, transaction.GetDataToSign(), transaction.Signature);
-
             if (!isSignatureValid)
             {
                 return (false, "Invalid digital signature! Transaction may be forged.");

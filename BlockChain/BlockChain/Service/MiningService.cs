@@ -16,6 +16,25 @@ namespace BlockChainP411NEW.Services
             _hashingService = hashingService;
         }
 
+        // Синхронний метод для MineBlock у BlockChainService
+        public void MineBlock(Block block, int difficulty)
+        {
+            string target = new string('0', difficulty);
+            block.Nonce = 0;
+            Stopwatch stopwatch = Stopwatch.StartNew();
+
+            do
+            {
+                block.Nonce++;
+                block.Hash = _hashingService.ComputeHash(block);
+            }
+            while (!block.Hash.StartsWith(target));
+
+            stopwatch.Stop();
+            block.MiningDuration = stopwatch.Elapsed.TotalSeconds;
+            Console.WriteLine($"[Успіх] Блок знайдено за {block.MiningDuration:F3} сек. Nonce: {block.Nonce}");
+        }
+
         public async Task<bool> MineBlockAsync(Block block, int difficulty, CancellationToken cancellationToken)
         {
             int coreCount = Environment.ProcessorCount;
@@ -27,7 +46,6 @@ namespace BlockChainP411NEW.Services
             object lockObj = new object();
             var tasks = new List<Task>();
 
-            // Збираємо базу ОДИН раз (всі транзакції вже враховані всередині GetBaseBlockData)
             string baseData = _hashingService.GetBaseBlockData(block);
             byte[] baseBytes = System.Text.Encoding.UTF8.GetBytes(baseData);
             byte[] difficultyBytes = System.Text.Encoding.UTF8.GetBytes(block.Difficulty.ToString());
